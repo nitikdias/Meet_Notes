@@ -124,6 +124,7 @@ def diarize_and_segment(chunk_path, rttm_path):
 
         # Assign speaker label
         #pretrain
+        #change the path 
         nitik_sample_path = "D:/meeting poc/language_meet - Copy/IndicTrans2/huggingface_interface/IndicTransToolkit/voices/nitik.wav"  # Replace with actual path
         nitik_embedding = inference(nitik_sample_path).reshape(1, -1)
         speaker_embeddings.append(nitik_embedding)
