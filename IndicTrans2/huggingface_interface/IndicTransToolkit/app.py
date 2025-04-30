@@ -17,19 +17,21 @@ from dotenv import load_dotenv
 import torch
 from transformers import AutoModelForSeq2SeqLM, BitsAndBytesConfig, AutoTokenizer
 from IndicTransToolkit import IndicProcessor
+from concurrent.futures import ThreadPoolExecutor
 
 app = Flask(__name__)
 
 # Constants
-CHUNK = 1024
-FORMAT = pyaudio.paInt16
+FORMAT = pyaudio.paInt24 #this is for virtual mic change it to paInt16 for physical mic
 CHANNELS = 1
-RATE = 16000 
+RATE = 48000    #this is for virtual mic change it to 16000 for physical mic
 CHUNK_DURATION = 6 #this are the seconds we can change it from range 3-10 second 
+buffer_rate=16000
 CHUNK_DIR = "chunks"
 SEGMENT_DIR = "segments"
-ACCESS_TOKEN = "access_token here"
+ACCESS_TOKEN = "replace with hugging face token"
 THRESHOLD = 0.8  # frequency to match the speaker simalarity using cosine
+
 
 # State
 recording = False
@@ -39,7 +41,9 @@ recording_thread = None
 last_speaker = None
 transcript_lines = []
 selected_language = "en-IN"
-
+input_device_index=1
+executor = ThreadPoolExecutor(max_workers=5) 
+unknown_speaker_count = 1 
 # Directories
 os.makedirs(CHUNK_DIR, exist_ok=True)
 os.makedirs(SEGMENT_DIR, exist_ok=True)
@@ -54,6 +58,9 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 # Speaker label storage
 speaker_embeddings = []
 segment_speakers = []
+speaker_names = []
+
+
 
 #indic
 BATCH_SIZE = 4
@@ -62,9 +69,10 @@ quantization = None
 
 # Transcription function
 def extract_text_from_audio(audio_file_path, start_time, end_time):
+    buffer=800
     recognizer = sr.Recognizer()
     with sr.AudioFile(audio_file_path) as source:
-        audio = recognizer.record(source, duration=end_time - start_time, offset=start_time)
+        audio = recognizer.record(source, duration=end_time+buffer, offset=start_time)
     try:
         return recognizer.recognize_google(audio, language=selected_language)
     except sr.UnknownValueError:
@@ -93,22 +101,86 @@ def diarize_and_segment(chunk_path, rttm_path):
         start = row["Start"]
         duration = row["Duration"]
 
-        if duration < 0.8:
+        if duration < 0.5:
             continue
-        
-        buffer=300
+
+        buffer=800
         end = start + duration
         start_ms = int(start * 1000)
-        end_ms = int(end * 1000)+buffer
+        end_ms = int(end * 1000)+buffer 
 
         segment_audio = audio[start_ms:end_ms]
         segment_filename = f"segment_{segment_counter}.wav"
         segment_path = os.path.join(SEGMENT_DIR, segment_filename)
         segment_audio.export(segment_path, format="wav")
         print(f" Saved: {segment_filename} | Start={start:.3f}s Duration={duration:.3f}s")
+        segment_counter += 1
+
+        # Transcribe the segment
+        transcript = extract_text_from_audio(segment_path, start_time=0, end_time=duration)
+        if transcript.strip() == "":
+            print(f" Skipping {segment_filename} — empty transcription")
+            continue  # Skip embedding and labeling
 
         # Assign speaker label
+        #pretrain
+        nitik_sample_path = "D:/meeting poc/language_meet - Copy/IndicTrans2/huggingface_interface/IndicTransToolkit/voices/nitik.wav"  # Replace with actual path
+        nitik_embedding = inference(nitik_sample_path).reshape(1, -1)
+        speaker_embeddings.append(nitik_embedding)
+        speaker_names.append("Nitik")
+
+        nitik_sample_path2 = "D:/meeting poc/language_meet - Copy/IndicTrans2/huggingface_interface/IndicTransToolkit/voices/nitik2.wav"  # Replace with actual path
+        nitik_embedding2 = inference(nitik_sample_path2).reshape(1, -1)
+        speaker_embeddings.append(nitik_embedding2)
+        speaker_names.append("Nitik")
+
+        nitik_sample_path3 = "D:/meeting poc/language_meet - Copy/IndicTrans2/huggingface_interface/IndicTransToolkit/voices/nitik3.wav"  # Replace with actual path
+        nitik_embedding3 = inference(nitik_sample_path3).reshape(1, -1)
+        speaker_embeddings.append(nitik_embedding3)
+        speaker_names.append("Nitik")
+
+        indu_sample_path="D:/meeting poc/language_meet - Copy/IndicTrans2/huggingface_interface/IndicTransToolkit/voices/indu.wav"
+        indu_embedding = inference(indu_sample_path).reshape(1, -1)
+        speaker_embeddings.append(indu_embedding)
+        speaker_names.append("Indu")
+
+        indu_sample_path2="D:/meeting poc/language_meet - Copy/IndicTrans2/huggingface_interface/IndicTransToolkit/voices/indu2.wav"
+        indu_embedding2 = inference(indu_sample_path2).reshape(1, -1)
+        speaker_embeddings.append(indu_embedding2)
+        speaker_names.append("Indu")
+
+        indu_sample_path3="D:/meeting poc/language_meet - Copy/IndicTrans2/huggingface_interface/IndicTransToolkit/voices/indu3.wav"
+        indu_embedding3 = inference(indu_sample_path3).reshape(1, -1)
+        speaker_embeddings.append(indu_embedding3)
+        speaker_names.append("Indu")
+
+        ramya_sample_path="D:/meeting poc/language_meet - Copy/IndicTrans2/huggingface_interface/IndicTransToolkit/voices/ramya.wav"
+        ramya_embedding = inference(ramya_sample_path).reshape(1, -1)
+        speaker_embeddings.append(ramya_embedding)
+        speaker_names.append("Ramya")
+
+        ramya_sample_path2="D:/meeting poc/language_meet - Copy/IndicTrans2/huggingface_interface/IndicTransToolkit/voices/ramya2.wav"
+        ramya_embedding2 = inference(ramya_sample_path2).reshape(1, -1)
+        speaker_embeddings.append(ramya_embedding2)
+        speaker_names.append("Ramya")
+
+        ramya_sample_path3="D:/meeting poc/language_meet - Copy/IndicTrans2/huggingface_interface/IndicTransToolkit/voices/ramya3.wav"
+        ramya_embedding3 = inference(ramya_sample_path3).reshape(1, -1)
+        speaker_embeddings.append(ramya_embedding3)
+        speaker_names.append("Ramya")
+
+        vidit_sample_path="D:/meeting poc/language_meet - Copy/IndicTrans2/huggingface_interface/IndicTransToolkit/voices/vidit.wav"
+        vidit_embedding = inference(vidit_sample_path).reshape(1, -1)
+        speaker_embeddings.append(vidit_embedding)
+        speaker_names.append("Vidit")
+
+        vidit_sample_path2="D:/meeting poc/language_meet - Copy/IndicTrans2/huggingface_interface/IndicTransToolkit/voices/vidit2.wav"
+        vidit_embedding2 = inference(vidit_sample_path2).reshape(1, -1)
+        speaker_embeddings.append(vidit_embedding2)
+        speaker_names.append("Vidit")
+
         emb = inference(segment_path).reshape(1, -1)
+        print(f'current={emb}')
         if not speaker_embeddings:
             speaker_embeddings.append(emb)
             speaker_label = "Speaker_1"
@@ -116,49 +188,45 @@ def diarize_and_segment(chunk_path, rttm_path):
         else:
             distances = [cdist(emb, known_emb, metric="cosine")[0, 0] for known_emb in speaker_embeddings]
             min_dist = min(distances)
+
             if min_dist <= THRESHOLD:
                 speaker_idx = distances.index(min_dist)
-                speaker_label = f"Speaker_{speaker_idx + 1}"
+                speaker_label = speaker_names[speaker_idx]
             else:
+                new_label = f"unknown_speaker_{unknown_speaker_count}"
+                unknown_speaker_count += 1  # Increment for next unknown speaker
                 speaker_embeddings.append(emb)
-                speaker_label = f"Speaker_{len(speaker_embeddings)}"
-            print(f" {segment_filename} → {speaker_label} (min_dist={min_dist:.4f})")
+                speaker_names.append(new_label)
+                speaker_label = new_label
 
-        segment_speakers.append((segment_filename, speaker_label))
+            print(f"{segment_filename} → {speaker_label} (min_dist={min_dist:.4f})")
+            segment_speakers.append((segment_filename, speaker_label))
+            print(f"{speaker_label}: {transcript}")
 
-        #  Transcribe the segment
-        transcript = extract_text_from_audio(segment_path, start_time=0, end_time=duration)
-        print(f"{speaker_label}: {transcript}")
-
-        #  Merge if same speaker as previous
+        # Merge if same speaker as previous
         if speaker_label == last_speaker and transcript_lines:
             transcript_lines[-1] = transcript_lines[-1].strip() + f" {transcript}"
         else:
             transcript_lines.append(f"{speaker_label}: {transcript}")
         last_speaker = speaker_label
 
-
-        #  Write the updated transcript to file
+        # Write the updated transcript to file
         with open("transcript.txt", "w", encoding="utf-8") as f:
             f.write("\n".join(transcript_lines))
 
-        segment_counter += 1
-
-
-
 def record_chunks():
-    global recording, chunk_counter
+    global recording, chunk_counter,input_device_index,buffer_rate
 
     p = pyaudio.PyAudio()
-    stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK,input_device_index=2)
+    stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=buffer_rate,input_device_index=input_device_index)
 
     try:
         while recording:
             frames = []
-            for _ in range(math.ceil(RATE / CHUNK * CHUNK_DURATION)):
+            for _ in range(math.ceil(RATE / buffer_rate * CHUNK_DURATION)):
                 if not recording:
                     break
-                data = stream.read(CHUNK)
+                data = stream.read(buffer_rate)
                 frames.append(data)
 
             if frames:
@@ -172,7 +240,7 @@ def record_chunks():
 
                 print(f"\n📦 Saved chunk: {chunk_path}")
                 rttm_path = chunk_path.replace(".wav", ".rttm")
-                threading.Thread(target=diarize_and_segment, args=(chunk_path, rttm_path)).start()
+                executor.submit(diarize_and_segment, chunk_path, rttm_path)
 
                 chunk_counter += 1
     finally:
@@ -301,8 +369,12 @@ def index():
 
 @app.route('/start', methods=['POST'])
 def start():
-    global recording, recording_thread, chunk_counter, segment_counter, speaker_embeddings, segment_speakers,selected_language
+    global recording, recording_thread, chunk_counter, segment_counter
+    global speaker_embeddings, segment_speakers, selected_language, input_device_index  # <-- Add input_device_index here
+
     selected_language = request.args.get("lang", "en-IN")
+    input_device_index = int(request.args.get("input_device_index", 3))  # <-- Get value from frontend
+
     if not recording:
         recording = True
         chunk_counter = 1
@@ -312,32 +384,50 @@ def start():
 
         recording_thread = threading.Thread(target=record_chunks)
         recording_thread.start()
-        return jsonify({'status': 'Recording started'})
-    return jsonify({'status': 'Already recording'})
+        return jsonify({'status': f'🎙️Recording started using device {input_device_index}'})
+
+    return jsonify({'status': '✅ Already recording'})
+
 
 @app.route('/stop', methods=['POST'])
 def stop():
-    global recording, recording_thread
+    global recording, recording_thread, chunk_counter, executor
 
     recording = False
+
     if recording_thread is not None:
         recording_thread.join()
+        print("🛑 Recording thread stopped.")
 
+    # Handle final partial chunk if exists
+    last_chunk_index = chunk_counter
+    last_chunk_path = os.path.join(CHUNK_DIR, f"chunk_{last_chunk_index}.wav")
+    rttm_path = last_chunk_path.replace(".wav", ".rttm")
+
+    # Only process the last chunk if it hasn't already
+    if os.path.exists(last_chunk_path) and not os.path.exists(rttm_path):
+        print(f"🧩 Processing final chunk: chunk_{last_chunk_index}.wav")
+        future = executor.submit(diarize_and_segment, last_chunk_path, rttm_path)
+        future.result()  # Wait for it to finish
+
+    # Shutdown executor after all diarization tasks
+    executor.shutdown(wait=True)
+
+    # Save speaker labels from processed segments
     if segment_speakers:
         df = pd.DataFrame(segment_speakers, columns=["segment", "speaker"])
         df.to_csv("detected_speakers.csv", index=False)
-        print(" Speaker labels saved to detected_speakers.csv")
+        print("✅ Speaker labels saved to detected_speakers.csv")
 
-        print(" Transcribing segments...")
-        transcript = []
-        for segment_file, speaker in segment_speakers:
-            audio_path = os.path.join(SEGMENT_DIR, segment_file)
-            duration = AudioSegment.from_wav(audio_path).duration_seconds
-            text = extract_text_from_audio(audio_path, 0, duration)
-            transcript.append(f"{speaker}: {text}")
-        print(" Transcript saved to transcript.txt")
+    # Write final transcript if not already
+    with open("transcript.txt", "w", encoding="utf-8") as f:
+        f.write("\n".join(transcript_lines))
+    print("✅ Transcript finalized.")
 
-    return jsonify({'status': 'Recording stopped, speakers labeled, and transcript saved'})
+    return jsonify({
+        'status': '🛑 Recording stopped'
+    })
+
 
 import os
 
@@ -364,7 +454,7 @@ def clear():
         os.remove("transcript.txt")
         print(" transcript.txt removed.")
 
-    return jsonify({'status': 'All chunks, segments, transcript, and CSV cleared'})
+    return jsonify({'status': '✅All chunks, segments, transcript, and CSV cleared'})
 
 
 
@@ -394,7 +484,7 @@ def get_summary():
         prompt = f"""
         You are a helpful assistant. Please read the following meeting transcript and return the following:
 
-        1. A brief summary of the conversation 
+        1. A complete summary of the conversation 
         2. Key discussion points (as bullet points)
         3. Action items (as bullet points)
 
